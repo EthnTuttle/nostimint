@@ -1,58 +1,39 @@
 use std::ffi;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
 
-use anyhow::{format_err, Context as _};
 use fedimint_client::derivable_secret::DerivableSecret;
 use fedimint_client::module::init::ClientModuleInit;
 use fedimint_client::module::{ClientModule, IClientModule};
-use fedimint_client::sm::{Context, ModuleNotifier, OperationId};
-use fedimint_client::transaction::{ClientInput, ClientOutput, TransactionBuilder};
+use fedimint_client::sm::{Context, ModuleNotifier};
+
 use fedimint_client::{Client, DynGlobalClientContext};
-use fedimint_core::api::{DynGlobalApi, DynModuleApi, GlobalFederationApi};
+use fedimint_core::api::{DynGlobalApi, DynModuleApi};
 use fedimint_core::config::FederationId;
-use fedimint_core::core::{Decoder, IntoDynInstance, KeyPair};
-use fedimint_core::db::{Database, ModuleDatabaseTransaction};
+use fedimint_core::core::{Decoder, KeyPair};
+use fedimint_core::db::Database;
 use fedimint_core::module::{
     ApiVersion, CommonModuleInit, ExtendsCommonModuleInit, ModuleCommon, MultiApiVersion,
     TransactionItemAmount,
 };
-use fedimint_core::util::{BoxStream, NextOrPending};
-use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint};
+
+use fedimint_core::{apply, async_trait_maybe_send};
 pub use fedimint_nostimint_common as common;
 use fedimint_nostimint_common::config::NostimintClientConfig;
-use fedimint_nostimint_common::{
-    fed_key_pair, fed_public_key, NostimintCommonGen, NostimintInput, NostimintModuleTypes,
-    NostimintOutput, NostimintOutputOutcome, KIND,
-};
-use futures::{pin_mut, StreamExt};
+use fedimint_nostimint_common::{NostimintCommonGen, NostimintModuleTypes, KIND};
+
 use secp256k1::{Secp256k1, XOnlyPublicKey};
 use states::NostimintStateMachine;
 use threshold_crypto::{PublicKey, Signature};
 
 use crate::api::NostimintFederationApi;
-use crate::db::NostimintClientFundsKeyV0;
 
 pub mod api;
-mod db;
 mod states;
 
 /// Exposed API calls for client apps
 #[apply(async_trait_maybe_send!)]
 pub trait NostimintClientExt {
-    /// Request the federation prints money for us
-    async fn print_money(&self, amount: Amount) -> anyhow::Result<(OperationId, OutPoint)>;
-
-    /// Send money to another user
-    async fn send_money(&self, account: XOnlyPublicKey, amount: Amount)
-        -> anyhow::Result<OutPoint>;
-
-    /// Wait to receive money at an outpoint
-    async fn receive_money(&self, outpoint: OutPoint) -> anyhow::Result<()>;
-
-    /// Request the federation signs a message for us
-    async fn fed_signature(&self, message: &str) -> anyhow::Result<Signature>;
+    /// Request the federation signs a note for us
+    async fn fed_sign_note(&self, message: &str) -> anyhow::Result<Signature>;
 
     /// Return our account
     fn account(&self) -> XOnlyPublicKey;
@@ -63,97 +44,7 @@ pub trait NostimintClientExt {
 
 #[apply(async_trait_maybe_send!)]
 impl NostimintClientExt for Client {
-    async fn print_money(&self, amount: Amount) -> anyhow::Result<(OperationId, OutPoint)> {
-        let (_nostimint, instance) = self.get_first_module::<NostimintClientModule>(&KIND);
-        let op_id = OperationId(rand::random());
-
-        // TODO: Building a tx could be easier
-        // Create input using the fed's account
-        let input = ClientInput {
-            input: NostimintInput {
-                amount,
-                account: fed_public_key(),
-            },
-            keys: vec![fed_key_pair()],
-            state_machines: Arc::new(move |_, _| Vec::<NostimintStateMachine>::new()),
-        };
-
-        // Build and send tx to the fed
-        // Will output to our primary client module
-        let tx = TransactionBuilder::new().with_input(input.into_dyn(instance.id));
-        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let txid = self
-            .finalize_and_submit_transaction(op_id, KIND.as_str(), outpoint, tx)
-            .await?;
-
-        // Wait for the output of the primary module
-        self.await_primary_module_output(op_id, OutPoint { txid, out_idx: 0 })
-            .await
-            .context("Waiting for the output of print_money")?;
-
-        Ok((op_id, OutPoint { txid, out_idx: 0 }))
-    }
-
-    async fn send_money(
-        &self,
-        account: XOnlyPublicKey,
-        amount: Amount,
-    ) -> anyhow::Result<OutPoint> {
-        let (nostimint, instance) = self.get_first_module::<NostimintClientModule>(&KIND);
-        let mut dbtx = instance.db.begin_transaction().await;
-        let op_id = OperationId(rand::random());
-
-        // TODO: Building a tx could be easier
-        // Create input using our own account
-        let input = fedimint_client::module::ClientModule::create_sufficient_input(
-            nostimint,
-            &mut dbtx.get_isolated(),
-            op_id,
-            amount,
-        )
-        .await?;
-        dbtx.commit_tx().await;
-
-        // Create output using another account
-        let output = ClientOutput {
-            output: NostimintOutput { amount, account },
-            state_machines: Arc::new(move |_, _| Vec::<NostimintStateMachine>::new()),
-        };
-
-        // Build and send tx to the fed
-        let tx = TransactionBuilder::new()
-            .with_input(input.into_dyn(instance.id))
-            .with_output(output.into_dyn(instance.id));
-        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let txid = self
-            .finalize_and_submit_transaction(op_id, NostimintCommonGen::KIND.as_str(), outpoint, tx)
-            .await?;
-
-        let tx_subscription = self.transaction_updates(op_id).await;
-        tx_subscription.await_tx_accepted(txid).await?;
-
-        Ok(OutPoint { txid, out_idx: 0 })
-    }
-
-    async fn receive_money(&self, outpoint: OutPoint) -> anyhow::Result<()> {
-        let (nostimint, instance) = self.get_first_module::<NostimintClientModule>(&KIND);
-        let mut dbtx = instance.db.begin_transaction().await;
-        let NostimintOutputOutcome(new_balance, account) = self
-            .api()
-            .await_output_outcome(outpoint, Duration::from_secs(10), &nostimint.decoder())
-            .await?;
-
-        if account != nostimint.key.x_only_public_key().0 {
-            return Err(format_err!("Wrong account id"));
-        }
-
-        dbtx.insert_entry(&NostimintClientFundsKeyV0, &new_balance)
-            .await;
-        dbtx.commit_tx().await;
-        Ok(())
-    }
-
-    async fn fed_signature(&self, message: &str) -> anyhow::Result<Signature> {
+    async fn fed_sign_note(&self, message: &str) -> anyhow::Result<Signature> {
         let (_nostimint, instance) = self.get_first_module::<NostimintClientModule>(&KIND);
         instance.api.sign_note(message.to_string()).await?;
         let sig = instance.api.wait_signed_note(message.to_string()).await?;
@@ -217,97 +108,7 @@ impl ClientModule for NostimintClientModule {
     }
 
     fn supports_being_primary(&self) -> bool {
-        true
-    }
-
-    async fn create_sufficient_input(
-        &self,
-        dbtx: &mut ModuleDatabaseTransaction<'_>,
-        id: OperationId,
-        amount: Amount,
-    ) -> anyhow::Result<ClientInput<<Self::Common as ModuleCommon>::Input, Self::States>> {
-        // Check and subtract from our funds
-        let funds = get_funds(dbtx).await;
-        if funds < amount {
-            return Err(format_err!("Insufficient funds"));
-        }
-        let updated = funds - amount;
-        dbtx.insert_entry(&NostimintClientFundsKeyV0, &updated)
-            .await;
-
-        // Construct input and state machine to track the tx
-        Ok(ClientInput {
-            input: NostimintInput {
-                amount,
-                account: self.key.x_only_public_key().0,
-            },
-            keys: vec![self.key],
-            state_machines: Arc::new(move |txid, _| {
-                vec![NostimintStateMachine::Input(amount, txid, id)]
-            }),
-        })
-    }
-
-    async fn create_exact_output(
-        &self,
-        _dbtx: &mut ModuleDatabaseTransaction<'_>,
-        id: OperationId,
-        amount: Amount,
-    ) -> ClientOutput<<Self::Common as ModuleCommon>::Output, Self::States> {
-        // Construct output and state machine to track the tx
-        ClientOutput {
-            output: NostimintOutput {
-                amount,
-                account: self.key.x_only_public_key().0,
-            },
-            state_machines: Arc::new(move |txid, _| {
-                vec![NostimintStateMachine::Output(amount, txid, id)]
-            }),
-        }
-    }
-
-    async fn await_primary_module_output(
-        &self,
-        operation_id: OperationId,
-        _out_point: OutPoint,
-    ) -> anyhow::Result<Amount> {
-        let stream = self
-            .notifier
-            .subscribe(operation_id)
-            .await
-            .filter_map(|state| async move {
-                match state {
-                    NostimintStateMachine::OutputDone(amount, _) => Some(Ok(amount)),
-                    NostimintStateMachine::Refund(_) => Some(Err(anyhow::anyhow!(
-                        "Error occurred processing the nostimint transaction"
-                    ))),
-                    _ => None,
-                }
-            });
-
-        pin_mut!(stream);
-
-        stream.next_or_pending().await
-    }
-
-    async fn get_balance(&self, dbtc: &mut ModuleDatabaseTransaction<'_>) -> Amount {
-        get_funds(dbtc).await
-    }
-
-    async fn subscribe_balance_changes(&self) -> BoxStream<'static, ()> {
-        Box::pin(
-            self.notifier
-                .subscribe_all_operations()
-                .await
-                .filter_map(|state| async move {
-                    match state {
-                        NostimintStateMachine::OutputDone(_, _) => Some(()),
-                        NostimintStateMachine::Input { .. } => Some(()),
-                        NostimintStateMachine::Refund(_) => Some(()),
-                        _ => None,
-                    }
-                }),
-        )
+        false
     }
 
     async fn handle_cli_command(
@@ -324,17 +125,17 @@ impl ClientModule for NostimintClientModule {
         let command = args[0].to_string_lossy();
 
         match command.as_ref() {
-            "print-money" => {
+            "sign-note" => {
                 if args.len() != 2 {
                     return Err(anyhow::format_err!(
-                        "`print-money` command expects 1 argument: <amount-msats>"
+                        "`sign-note` command expects 1 argument: <message of kind1 note>"
                     ));
                 }
 
+                // TODO: craft other note types
+
                 Ok(serde_json::to_value(
-                    client
-                        .print_money(Amount::from_str(&args[1].to_string_lossy())?)
-                        .await?,
+                    client.fed_sign_note(&args[1].to_string_lossy()).await?,
                 )?)
             }
             command => Err(anyhow::format_err!(
@@ -342,11 +143,6 @@ impl ClientModule for NostimintClientModule {
             )),
         }
     }
-}
-
-async fn get_funds(dbtx: &mut ModuleDatabaseTransaction<'_>) -> Amount {
-    let funds = dbtx.get_value(&NostimintClientFundsKeyV0).await;
-    funds.unwrap_or(Amount::ZERO)
 }
 
 #[derive(Debug, Clone)]
