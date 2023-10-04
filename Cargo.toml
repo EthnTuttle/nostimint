@@ -2,9 +2,9 @@
 members = [
     "fedimintd",
     "fedimint-cli",
-    "fedimint-dummy-common",
-    "fedimint-dummy-client",
-    "fedimint-dummy-server",
+    "fedimint-nostimint-common",
+    "fedimint-nostimint-client",
+    "fedimint-nostimint-server",
     "tests",
 ]
 resolver = "2"
@@ -13,12 +13,12 @@ resolver = "2"
 authors = ["The Fedimint Developers"]
 edition = "2021"
 description = "Fedimint compiled with custom module set"
-documentation = "https://github.com/fedimint/fedimint-custom-modules-example"
+documentation = "https://github.com/EthnTuttle/nostimint"
 readme = "README.md"
-homepage = "https://github.com/fedimint/fedimint-custom-modules-example"
-repository = "https://github.com/fedimint/fedimint-custom-modules-example"
+homepage = "https://github.com/EthnTuttle/nostimint"
+repository = "https://github.com/EthnTuttle/nostimint"
 license-file = "LICENSE"
-keywords = ["bitcoin", "lightning", "chaumian", "e-cash", "federated"]
+keywords = ["bitcoin", "lightning", "chaumian", "e-cash", "federated", "nostr"]
 
 [workspace.dependencies]
 fedimintd = { git = "https://github.com/fedimint/fedimint", tag = "v0.1.0" }

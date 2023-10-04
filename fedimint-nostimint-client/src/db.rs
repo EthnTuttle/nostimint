@@ -8,10 +8,10 @@ pub enum DbKeyPrefix {
 }
 
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash)]
-pub struct DummyClientFundsKeyV0;
+pub struct NostimintClientFundsKeyV0;
 
 impl_db_record!(
-    key = DummyClientFundsKeyV0,
+    key = NostimintClientFundsKeyV0,
     value = Amount,
     db_prefix = DbKeyPrefix::ClientFunds,
 );

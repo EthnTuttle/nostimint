@@ -5,14 +5,14 @@ use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::{apply, async_trait_maybe_send};
 
 #[apply(async_trait_maybe_send!)]
-pub trait DummyFederationApi {
+pub trait NostimintFederationApi {
     async fn sign_message(&self, message: String) -> FederationResult<()>;
 
     async fn wait_signed(&self, message: String) -> FederationResult<SerdeSignature>;
 }
 
 #[apply(async_trait_maybe_send!)]
-impl<T: ?Sized> DummyFederationApi for T
+impl<T: ?Sized> NostimintFederationApi for T
 where
     T: IModuleFederationApi + MaybeSend + MaybeSync + 'static,
 {

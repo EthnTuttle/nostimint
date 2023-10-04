@@ -1,6 +1,6 @@
 use std::fmt;
 
-use config::DummyClientConfig;
+use config::NostimintClientConfig;
 use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::epoch::SerdeSignatureShare;
@@ -16,21 +16,21 @@ use thiserror::Error;
 pub mod config;
 
 /// Unique name for this module
-pub const KIND: ModuleKind = ModuleKind::from_static_str("dummy");
+pub const KIND: ModuleKind = ModuleKind::from_static_str("nostimint");
 
 /// Modules are non-compatible with older versions
 pub const CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion(0);
 
 /// Non-transaction items that will be submitted to consensus
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub enum DummyConsensusItem {
+pub enum NostimintConsensusItem {
     /// User's message sign request signed by a single peer
     Sign(String, SerdeSignatureShare),
 }
 
 /// Input for a fedimint transaction
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct DummyInput {
+pub struct NostimintInput {
     pub amount: Amount,
     /// Associate the input with a user's pubkey
     pub account: XOnlyPublicKey,
@@ -38,7 +38,7 @@ pub struct DummyInput {
 
 /// Output for a fedimint transaction
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct DummyOutput {
+pub struct NostimintOutput {
     pub amount: Amount,
     /// Associate the output with a user's pubkey
     pub account: XOnlyPublicKey,
@@ -46,69 +46,69 @@ pub struct DummyOutput {
 
 /// Information needed by a client to update output funds
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct DummyOutputOutcome(pub Amount, pub XOnlyPublicKey);
+pub struct NostimintOutputOutcome(pub Amount, pub XOnlyPublicKey);
 
 /// Errors that might be returned by the server
 // TODO: Move to server lib?
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error)]
-pub enum DummyError {
+pub enum NostimintError {
     #[error("Not enough funds")]
     NotEnoughFunds,
 }
 
 /// Contains the types defined above
-pub struct DummyModuleTypes;
+pub struct NostimintModuleTypes;
 
 // Wire together the types for this module
 plugin_types_trait_impl_common!(
-    DummyModuleTypes,
-    DummyClientConfig,
-    DummyInput,
-    DummyOutput,
-    DummyOutputOutcome,
-    DummyConsensusItem
+    NostimintModuleTypes,
+    NostimintClientConfig,
+    NostimintInput,
+    NostimintOutput,
+    NostimintOutputOutcome,
+    NostimintConsensusItem
 );
 
 #[derive(Debug)]
-pub struct DummyCommonGen;
+pub struct NostimintCommonGen;
 
-impl CommonModuleInit for DummyCommonGen {
+impl CommonModuleInit for NostimintCommonGen {
     const CONSENSUS_VERSION: ModuleConsensusVersion = CONSENSUS_VERSION;
     const KIND: ModuleKind = KIND;
 
-    type ClientConfig = DummyClientConfig;
+    type ClientConfig = NostimintClientConfig;
 
     fn decoder() -> Decoder {
-        DummyModuleTypes::decoder_builder().build()
+        NostimintModuleTypes::decoder_builder().build()
     }
 }
 
-impl fmt::Display for DummyClientConfig {
+impl fmt::Display for NostimintClientConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DummyClientConfig")
+        write!(f, "NostimintClientConfig")
     }
 }
-impl fmt::Display for DummyInput {
+impl fmt::Display for NostimintInput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DummyInput {}", self.amount)
-    }
-}
-
-impl fmt::Display for DummyOutput {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DummyOutput {}", self.amount)
+        write!(f, "NostimintInput {}", self.amount)
     }
 }
 
-impl fmt::Display for DummyOutputOutcome {
+impl fmt::Display for NostimintOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DummyOutputOutcome")
+        write!(f, "NostimintOutput {}", self.amount)
     }
 }
 
-impl fmt::Display for DummyConsensusItem {
+impl fmt::Display for NostimintOutputOutcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DummyConsensusItem")
+        write!(f, "NostimintOutputOutcome")
+    }
+}
+
+impl fmt::Display for NostimintConsensusItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "NostimintConsensusItem")
     }
 }
 

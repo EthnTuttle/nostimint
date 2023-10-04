@@ -20,19 +20,19 @@ use fedimint_core::module::{
 };
 use fedimint_core::util::{BoxStream, NextOrPending};
 use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint};
-pub use fedimint_dummy_common as common;
-use fedimint_dummy_common::config::DummyClientConfig;
-use fedimint_dummy_common::{
-    fed_key_pair, fed_public_key, DummyCommonGen, DummyInput, DummyModuleTypes, DummyOutput,
-    DummyOutputOutcome, KIND,
+pub use fedimint_nostimint_common as common;
+use fedimint_nostimint_common::config::NostimintClientConfig;
+use fedimint_nostimint_common::{
+    fed_key_pair, fed_public_key, NostimintCommonGen, NostimintInput, NostimintModuleTypes,
+    NostimintOutput, NostimintOutputOutcome, KIND,
 };
 use futures::{pin_mut, StreamExt};
 use secp256k1::{Secp256k1, XOnlyPublicKey};
-use states::DummyStateMachine;
+use states::NostimintStateMachine;
 use threshold_crypto::{PublicKey, Signature};
 
-use crate::api::DummyFederationApi;
-use crate::db::DummyClientFundsKeyV0;
+use crate::api::NostimintFederationApi;
+use crate::db::NostimintClientFundsKeyV0;
 
 pub mod api;
 mod db;
@@ -40,7 +40,7 @@ mod states;
 
 /// Exposed API calls for client apps
 #[apply(async_trait_maybe_send!)]
-pub trait DummyClientExt {
+pub trait NostimintClientExt {
     /// Request the federation prints money for us
     async fn print_money(&self, amount: Amount) -> anyhow::Result<(OperationId, OutPoint)>;
 
@@ -62,20 +62,20 @@ pub trait DummyClientExt {
 }
 
 #[apply(async_trait_maybe_send!)]
-impl DummyClientExt for Client {
+impl NostimintClientExt for Client {
     async fn print_money(&self, amount: Amount) -> anyhow::Result<(OperationId, OutPoint)> {
-        let (_dummy, instance) = self.get_first_module::<DummyClientModule>(&KIND);
+        let (_nostimint, instance) = self.get_first_module::<NostimintClientModule>(&KIND);
         let op_id = OperationId(rand::random());
 
         // TODO: Building a tx could be easier
         // Create input using the fed's account
         let input = ClientInput {
-            input: DummyInput {
+            input: NostimintInput {
                 amount,
                 account: fed_public_key(),
             },
             keys: vec![fed_key_pair()],
-            state_machines: Arc::new(move |_, _| Vec::<DummyStateMachine>::new()),
+            state_machines: Arc::new(move |_, _| Vec::<NostimintStateMachine>::new()),
         };
 
         // Build and send tx to the fed
@@ -99,14 +99,14 @@ impl DummyClientExt for Client {
         account: XOnlyPublicKey,
         amount: Amount,
     ) -> anyhow::Result<OutPoint> {
-        let (dummy, instance) = self.get_first_module::<DummyClientModule>(&KIND);
+        let (nostimint, instance) = self.get_first_module::<NostimintClientModule>(&KIND);
         let mut dbtx = instance.db.begin_transaction().await;
         let op_id = OperationId(rand::random());
 
         // TODO: Building a tx could be easier
         // Create input using our own account
         let input = fedimint_client::module::ClientModule::create_sufficient_input(
-            dummy,
+            nostimint,
             &mut dbtx.get_isolated(),
             op_id,
             amount,
@@ -116,8 +116,8 @@ impl DummyClientExt for Client {
 
         // Create output using another account
         let output = ClientOutput {
-            output: DummyOutput { amount, account },
-            state_machines: Arc::new(move |_, _| Vec::<DummyStateMachine>::new()),
+            output: NostimintOutput { amount, account },
+            state_machines: Arc::new(move |_, _| Vec::<NostimintStateMachine>::new()),
         };
 
         // Build and send tx to the fed
@@ -126,7 +126,7 @@ impl DummyClientExt for Client {
             .with_output(output.into_dyn(instance.id));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
         let txid = self
-            .finalize_and_submit_transaction(op_id, DummyCommonGen::KIND.as_str(), outpoint, tx)
+            .finalize_and_submit_transaction(op_id, NostimintCommonGen::KIND.as_str(), outpoint, tx)
             .await?;
 
         let tx_subscription = self.transaction_updates(op_id).await;
@@ -136,66 +136,66 @@ impl DummyClientExt for Client {
     }
 
     async fn receive_money(&self, outpoint: OutPoint) -> anyhow::Result<()> {
-        let (dummy, instance) = self.get_first_module::<DummyClientModule>(&KIND);
+        let (nostimint, instance) = self.get_first_module::<NostimintClientModule>(&KIND);
         let mut dbtx = instance.db.begin_transaction().await;
-        let DummyOutputOutcome(new_balance, account) = self
+        let NostimintOutputOutcome(new_balance, account) = self
             .api()
-            .await_output_outcome(outpoint, Duration::from_secs(10), &dummy.decoder())
+            .await_output_outcome(outpoint, Duration::from_secs(10), &nostimint.decoder())
             .await?;
 
-        if account != dummy.key.x_only_public_key().0 {
+        if account != nostimint.key.x_only_public_key().0 {
             return Err(format_err!("Wrong account id"));
         }
 
-        dbtx.insert_entry(&DummyClientFundsKeyV0, &new_balance)
+        dbtx.insert_entry(&NostimintClientFundsKeyV0, &new_balance)
             .await;
         dbtx.commit_tx().await;
         Ok(())
     }
 
     async fn fed_signature(&self, message: &str) -> anyhow::Result<Signature> {
-        let (_dummy, instance) = self.get_first_module::<DummyClientModule>(&KIND);
+        let (_nostimint, instance) = self.get_first_module::<NostimintClientModule>(&KIND);
         instance.api.sign_message(message.to_string()).await?;
         let sig = instance.api.wait_signed(message.to_string()).await?;
         Ok(sig.0)
     }
 
     fn account(&self) -> XOnlyPublicKey {
-        let (dummy, _instance) = self.get_first_module::<DummyClientModule>(&KIND);
-        dummy.key.x_only_public_key().0
+        let (nostimint, _instance) = self.get_first_module::<NostimintClientModule>(&KIND);
+        nostimint.key.x_only_public_key().0
     }
 
     fn fed_public_key(&self) -> PublicKey {
-        let (dummy, _instance) = self.get_first_module::<DummyClientModule>(&KIND);
-        dummy.cfg.fed_public_key
+        let (nostimint, _instance) = self.get_first_module::<NostimintClientModule>(&KIND);
+        nostimint.cfg.fed_public_key
     }
 }
 
 #[derive(Debug)]
-pub struct DummyClientModule {
-    cfg: DummyClientConfig,
+pub struct NostimintClientModule {
+    cfg: NostimintClientConfig,
     key: KeyPair,
-    notifier: ModuleNotifier<DynGlobalClientContext, DummyStateMachine>,
+    notifier: ModuleNotifier<DynGlobalClientContext, NostimintStateMachine>,
 }
 
 /// Data needed by the state machine
 #[derive(Debug, Clone)]
-pub struct DummyClientContext {
-    pub dummy_decoder: Decoder,
+pub struct NostimintClientContext {
+    pub nostimint_decoder: Decoder,
 }
 
 // TODO: Boiler-plate
-impl Context for DummyClientContext {}
+impl Context for NostimintClientContext {}
 
 #[apply(async_trait_maybe_send!)]
-impl ClientModule for DummyClientModule {
-    type Common = DummyModuleTypes;
-    type ModuleStateMachineContext = DummyClientContext;
-    type States = DummyStateMachine;
+impl ClientModule for NostimintClientModule {
+    type Common = NostimintModuleTypes;
+    type ModuleStateMachineContext = NostimintClientContext;
+    type States = NostimintStateMachine;
 
     fn context(&self) -> Self::ModuleStateMachineContext {
-        DummyClientContext {
-            dummy_decoder: self.decoder(),
+        NostimintClientContext {
+            nostimint_decoder: self.decoder(),
         }
     }
 
@@ -232,17 +232,18 @@ impl ClientModule for DummyClientModule {
             return Err(format_err!("Insufficient funds"));
         }
         let updated = funds - amount;
-        dbtx.insert_entry(&DummyClientFundsKeyV0, &updated).await;
+        dbtx.insert_entry(&NostimintClientFundsKeyV0, &updated)
+            .await;
 
         // Construct input and state machine to track the tx
         Ok(ClientInput {
-            input: DummyInput {
+            input: NostimintInput {
                 amount,
                 account: self.key.x_only_public_key().0,
             },
             keys: vec![self.key],
             state_machines: Arc::new(move |txid, _| {
-                vec![DummyStateMachine::Input(amount, txid, id)]
+                vec![NostimintStateMachine::Input(amount, txid, id)]
             }),
         })
     }
@@ -255,12 +256,12 @@ impl ClientModule for DummyClientModule {
     ) -> ClientOutput<<Self::Common as ModuleCommon>::Output, Self::States> {
         // Construct output and state machine to track the tx
         ClientOutput {
-            output: DummyOutput {
+            output: NostimintOutput {
                 amount,
                 account: self.key.x_only_public_key().0,
             },
             state_machines: Arc::new(move |txid, _| {
-                vec![DummyStateMachine::Output(amount, txid, id)]
+                vec![NostimintStateMachine::Output(amount, txid, id)]
             }),
         }
     }
@@ -276,9 +277,9 @@ impl ClientModule for DummyClientModule {
             .await
             .filter_map(|state| async move {
                 match state {
-                    DummyStateMachine::OutputDone(amount, _) => Some(Ok(amount)),
-                    DummyStateMachine::Refund(_) => Some(Err(anyhow::anyhow!(
-                        "Error occurred processing the dummy transaction"
+                    NostimintStateMachine::OutputDone(amount, _) => Some(Ok(amount)),
+                    NostimintStateMachine::Refund(_) => Some(Err(anyhow::anyhow!(
+                        "Error occurred processing the nostimint transaction"
                     ))),
                     _ => None,
                 }
@@ -300,9 +301,9 @@ impl ClientModule for DummyClientModule {
                 .await
                 .filter_map(|state| async move {
                     match state {
-                        DummyStateMachine::OutputDone(_, _) => Some(()),
-                        DummyStateMachine::Input { .. } => Some(()),
-                        DummyStateMachine::Refund(_) => Some(()),
+                        NostimintStateMachine::OutputDone(_, _) => Some(()),
+                        NostimintStateMachine::Input { .. } => Some(()),
+                        NostimintStateMachine::Refund(_) => Some(()),
                         _ => None,
                     }
                 }),
@@ -344,22 +345,22 @@ impl ClientModule for DummyClientModule {
 }
 
 async fn get_funds(dbtx: &mut ModuleDatabaseTransaction<'_>) -> Amount {
-    let funds = dbtx.get_value(&DummyClientFundsKeyV0).await;
+    let funds = dbtx.get_value(&NostimintClientFundsKeyV0).await;
     funds.unwrap_or(Amount::ZERO)
 }
 
 #[derive(Debug, Clone)]
-pub struct DummyClientGen;
+pub struct NostimintClientGen;
 
 // TODO: Boilerplate-code
-impl ExtendsCommonModuleInit for DummyClientGen {
-    type Common = DummyCommonGen;
+impl ExtendsCommonModuleInit for NostimintClientGen {
+    type Common = NostimintCommonGen;
 }
 
 /// Generates the client module
 #[apply(async_trait_maybe_send!)]
-impl ClientModuleInit for DummyClientGen {
-    type Module = DummyClientModule;
+impl ClientModuleInit for NostimintClientGen {
+    type Module = NostimintClientModule;
 
     fn supported_api_versions(&self) -> MultiApiVersion {
         MultiApiVersion::try_from_iter([ApiVersion { major: 0, minor: 0 }])
@@ -369,7 +370,7 @@ impl ClientModuleInit for DummyClientGen {
     async fn init(
         &self,
         _federation_id: FederationId,
-        cfg: DummyClientConfig,
+        cfg: NostimintClientConfig,
         _db: Database,
         _api_version: ApiVersion,
         module_root_secret: DerivableSecret,
@@ -377,7 +378,7 @@ impl ClientModuleInit for DummyClientGen {
         _api: DynGlobalApi,
         _module_api: DynModuleApi,
     ) -> anyhow::Result<Self::Module> {
-        Ok(DummyClientModule {
+        Ok(NostimintClientModule {
             cfg,
             key: module_root_secret.to_secp_key(&Secp256k1::new()),
             notifier,

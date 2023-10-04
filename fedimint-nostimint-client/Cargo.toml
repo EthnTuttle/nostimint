@@ -1,19 +1,19 @@
 [package]
-name = "fedimint-dummy-client"
+name = "fedimint-nostimint-client"
 version = "0.1.0"
 authors = ["The Fedimint Developers"]
 edition = "2021"
-description = "fedimint-dummy is a dummy example fedimint module."
+description = "fedimint-nostimint is a nostimint example fedimint module."
 license = "MIT"
 
 [lib]
-name = "fedimint_dummy_client"
+name = "fedimint_nostimint_client"
 path = "src/lib.rs"
 
 [dependencies]
 async-trait = "0.1"
 anyhow = "1.0.66"
-fedimint-dummy-common ={ path = "../fedimint-dummy-common" }
+fedimint-nostimint-common ={ path = "../fedimint-nostimint-common" }
 fedimint-client = { workspace = true }
 fedimint-core ={ workspace = true }
 futures = "0.3"

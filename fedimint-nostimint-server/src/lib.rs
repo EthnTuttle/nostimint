@@ -18,13 +18,13 @@ use fedimint_core::module::{
 use fedimint_core::server::DynServerModule;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::{push_db_pair_items, Amount, NumPeers, OutPoint, PeerId, ServerModule};
-pub use fedimint_dummy_common::config::{
-    DummyClientConfig, DummyConfig, DummyConfigConsensus, DummyConfigLocal, DummyConfigPrivate,
-    DummyGenParams,
+pub use fedimint_nostimint_common::config::{
+    NostimintClientConfig, NostimintConfig, NostimintConfigConsensus, NostimintConfigLocal,
+    NostimintConfigPrivate, NostimintGenParams,
 };
-pub use fedimint_dummy_common::{
-    fed_public_key, DummyCommonGen, DummyConsensusItem, DummyError, DummyInput, DummyModuleTypes,
-    DummyOutput, DummyOutputOutcome, CONSENSUS_VERSION, KIND,
+pub use fedimint_nostimint_common::{
+    fed_public_key, NostimintCommonGen, NostimintConsensusItem, NostimintError, NostimintInput,
+    NostimintModuleTypes, NostimintOutput, NostimintOutputOutcome, CONSENSUS_VERSION, KIND,
 };
 use fedimint_server::config::distributedgen::PeerHandleOps;
 use futures::{FutureExt, StreamExt};
@@ -35,26 +35,26 @@ use threshold_crypto::{PublicKeySet, SecretKeySet};
 use tokio::sync::Notify;
 
 use crate::db::{
-    migrate_to_v1, DbKeyPrefix, DummyFundsKeyV1, DummyFundsPrefixV1, DummyOutcomeKey,
-    DummyOutcomePrefix, DummySignatureKey, DummySignaturePrefix, DummySignatureShareKey,
-    DummySignatureSharePrefix, DummySignatureShareStringPrefix,
+    migrate_to_v1, DbKeyPrefix, NostimintFundsKeyV1, NostimintFundsPrefixV1, NostimintOutcomeKey,
+    NostimintOutcomePrefix, NostimintSignatureKey, NostimintSignaturePrefix,
+    NostimintSignatureShareKey, NostimintSignatureSharePrefix, NostimintSignatureShareStringPrefix,
 };
 
 mod db;
 
 /// Generates the module
 #[derive(Debug, Clone)]
-pub struct DummyGen;
+pub struct NostimintGen;
 
 // TODO: Boilerplate-code
-impl ExtendsCommonModuleInit for DummyGen {
-    type Common = DummyCommonGen;
+impl ExtendsCommonModuleInit for NostimintGen {
+    type Common = NostimintCommonGen;
 }
 
 /// Implementation of server module non-consensus functions
 #[async_trait]
-impl ServerModuleInit for DummyGen {
-    type Params = DummyGenParams;
+impl ServerModuleInit for NostimintGen {
+    type Params = NostimintGenParams;
     const DATABASE_VERSION: DatabaseVersion = DatabaseVersion(1);
 
     /// Returns the version of this module
@@ -73,7 +73,7 @@ impl ServerModuleInit for DummyGen {
         _db: Database,
         _task_group: &mut TaskGroup,
     ) -> anyhow::Result<DynServerModule> {
-        Ok(Dummy::new(cfg.to_typed()?).into())
+        Ok(Nostimint::new(cfg.to_typed()?).into())
     }
 
     /// DB migrations to move from old to newer versions
@@ -98,12 +98,12 @@ impl ServerModuleInit for DummyGen {
             .iter()
             .map(|&peer| {
                 let private_key_share = SerdeSecret(sks.secret_key_share(peer.to_usize()));
-                let config = DummyConfig {
-                    local: DummyConfigLocal {
+                let config = NostimintConfig {
+                    local: NostimintConfigLocal {
                         example: params.local.0.clone(),
                     },
-                    private: DummyConfigPrivate { private_key_share },
-                    consensus: DummyConfigConsensus {
+                    private: NostimintConfigPrivate { private_key_share },
+                    consensus: NostimintConfigConsensus {
                         public_key_set: pks.clone(),
                         tx_fee: params.consensus.tx_fee,
                     },
@@ -125,14 +125,14 @@ impl ServerModuleInit for DummyGen {
         let g1 = peers.run_dkg_g1(()).await?;
         let keys = g1[&()].threshold_crypto();
 
-        Ok(DummyConfig {
-            local: DummyConfigLocal {
+        Ok(NostimintConfig {
+            local: NostimintConfigLocal {
                 example: params.local.0.clone(),
             },
-            private: DummyConfigPrivate {
+            private: NostimintConfigPrivate {
                 private_key_share: keys.secret_key_share,
             },
-            consensus: DummyConfigConsensus {
+            consensus: NostimintConfigConsensus {
                 public_key_set: keys.public_key_set,
                 tx_fee: params.consensus.tx_fee,
             },
@@ -144,9 +144,9 @@ impl ServerModuleInit for DummyGen {
     fn get_client_config(
         &self,
         config: &ServerModuleConsensusConfig,
-    ) -> anyhow::Result<DummyClientConfig> {
-        let config = DummyConfigConsensus::from_erased(config)?;
-        Ok(DummyClientConfig {
+    ) -> anyhow::Result<NostimintClientConfig> {
+        let config = NostimintConfigConsensus::from_erased(config)?;
+        Ok(NostimintClientConfig {
             tx_fee: config.tx_fee,
             fed_public_key: config.public_key_set.public_key(),
         })
@@ -154,7 +154,7 @@ impl ServerModuleInit for DummyGen {
 
     /// Validates the private/public key of configs
     fn validate_config(&self, identity: &PeerId, config: ServerModuleConfig) -> anyhow::Result<()> {
-        let config = config.to_typed::<DummyConfig>()?;
+        let config = config.to_typed::<NostimintConfig>()?;
         let our_id = identity.to_usize();
         let our_share = config.consensus.public_key_set.public_key_share(our_id);
 
@@ -182,41 +182,41 @@ impl ServerModuleInit for DummyGen {
                 DbKeyPrefix::Funds => {
                     push_db_pair_items!(
                         dbtx,
-                        DummyFundsPrefixV1,
-                        DummyFundsKeyV1,
+                        NostimintFundsPrefixV1,
+                        NostimintFundsKeyV1,
                         Amount,
                         items,
-                        "Dummy Funds"
+                        "Nostimint Funds"
                     );
                 }
                 DbKeyPrefix::Outcome => {
                     push_db_pair_items!(
                         dbtx,
-                        DummyOutcomePrefix,
-                        DummyOutcomeKey,
-                        DummyOutputOutcome,
+                        NostimintOutcomePrefix,
+                        NostimintOutcomeKey,
+                        NostimintOutputOutcome,
                         items,
-                        "Dummy Outputs"
+                        "Nostimint Outputs"
                     );
                 }
                 DbKeyPrefix::SignatureShare => {
                     push_db_pair_items!(
                         dbtx,
-                        DummySignatureSharePrefix,
-                        DummySignatureShareKey,
+                        NostimintSignatureSharePrefix,
+                        NostimintSignatureShareKey,
                         SerdeSignatureShare,
                         items,
-                        "Dummy Signature Shares"
+                        "Nostimint Signature Shares"
                     );
                 }
                 DbKeyPrefix::Signature => {
                     push_db_pair_items!(
                         dbtx,
-                        DummySignaturePrefix,
-                        DummySignatureKey,
+                        NostimintSignaturePrefix,
+                        NostimintSignatureKey,
                         Option<SerdeSignature>,
                         items,
-                        "Dummy Signatures"
+                        "Nostimint Signatures"
                     );
                 }
             }
@@ -226,21 +226,21 @@ impl ServerModuleInit for DummyGen {
     }
 }
 
-/// Dummy module
+/// Nostimint module
 #[derive(Debug)]
-pub struct Dummy {
-    pub cfg: DummyConfig,
+pub struct Nostimint {
+    pub cfg: NostimintConfig,
     /// Notifies us to propose an epoch
     pub sign_notify: Notify,
 }
 
 /// Implementation of consensus for the server module
 #[async_trait]
-impl ServerModule for Dummy {
+impl ServerModule for Nostimint {
     /// Define the consensus types
-    type Common = DummyModuleTypes;
-    type Gen = DummyGen;
-    type VerificationCache = DummyVerificationCache;
+    type Common = NostimintModuleTypes;
+    type Gen = NostimintGen;
+    type VerificationCache = NostimintVerificationCache;
 
     async fn await_consensus_proposal(&self, dbtx: &mut ModuleDatabaseTransaction<'_>) {
         // Wait until we have a proposal
@@ -252,10 +252,10 @@ impl ServerModule for Dummy {
     async fn consensus_proposal(
         &self,
         dbtx: &mut ModuleDatabaseTransaction<'_>,
-    ) -> ConsensusProposal<DummyConsensusItem> {
+    ) -> ConsensusProposal<NostimintConsensusItem> {
         // Sign and send the print requests to consensus
         let sign_requests: Vec<_> = dbtx
-            .find_by_prefix(&DummySignaturePrefix)
+            .find_by_prefix(&NostimintSignaturePrefix)
             .await
             .collect()
             .await;
@@ -263,9 +263,9 @@ impl ServerModule for Dummy {
         let consensus_items = sign_requests
             .into_iter()
             .filter(|(_, sig)| sig.is_none())
-            .map(|(DummySignatureKey(message), _)| {
+            .map(|(NostimintSignatureKey(message), _)| {
                 let sig = self.cfg.private.private_key_share.sign(&message);
-                DummyConsensusItem::Sign(message, SerdeSignatureShare(sig))
+                NostimintConsensusItem::Sign(message, SerdeSignatureShare(sig))
             });
         ConsensusProposal::new_auto_trigger(consensus_items.collect())
     }
@@ -273,13 +273,13 @@ impl ServerModule for Dummy {
     async fn process_consensus_item<'a, 'b>(
         &'a self,
         dbtx: &mut ModuleDatabaseTransaction<'b>,
-        consensus_item: DummyConsensusItem,
+        consensus_item: NostimintConsensusItem,
         peer_id: PeerId,
     ) -> anyhow::Result<()> {
-        let DummyConsensusItem::Sign(request, share) = consensus_item;
+        let NostimintConsensusItem::Sign(request, share) = consensus_item;
 
         if dbtx
-            .get_value(&DummySignatureShareKey(request.clone(), peer_id))
+            .get_value(&NostimintSignatureShareKey(request.clone(), peer_id))
             .await
             .is_some()
         {
@@ -296,12 +296,15 @@ impl ServerModule for Dummy {
             bail!("Signature share is invalid");
         }
 
-        dbtx.insert_new_entry(&DummySignatureShareKey(request.clone(), peer_id), &share)
-            .await;
+        dbtx.insert_new_entry(
+            &NostimintSignatureShareKey(request.clone(), peer_id),
+            &share,
+        )
+        .await;
 
         // Collect all valid signature shares previously received
         let signature_shares = dbtx
-            .find_by_prefix(&DummySignatureShareStringPrefix(request.clone()))
+            .find_by_prefix(&NostimintSignatureShareStringPrefix(request.clone()))
             .await
             .collect::<Vec<_>>()
             .await;
@@ -321,11 +324,11 @@ impl ServerModule for Dummy {
             )
             .expect("We have verified all signature shares before");
 
-        dbtx.remove_by_prefix(&DummySignatureShareStringPrefix(request.clone()))
+        dbtx.remove_by_prefix(&NostimintSignatureShareStringPrefix(request.clone()))
             .await;
 
         dbtx.insert_entry(
-            &DummySignatureKey(request.to_string()),
+            &NostimintSignatureKey(request.to_string()),
             &Some(SerdeSignature(threshold_signature)),
         )
         .await;
@@ -335,25 +338,25 @@ impl ServerModule for Dummy {
 
     fn build_verification_cache<'a>(
         &'a self,
-        _inputs: impl Iterator<Item = &'a DummyInput> + Send,
+        _inputs: impl Iterator<Item = &'a NostimintInput> + Send,
     ) -> Self::VerificationCache {
-        DummyVerificationCache
+        NostimintVerificationCache
     }
 
     async fn process_input<'a, 'b, 'c>(
         &'a self,
         dbtx: &mut ModuleDatabaseTransaction<'c>,
-        input: &'b DummyInput,
+        input: &'b NostimintInput,
         _cache: &Self::VerificationCache,
     ) -> Result<InputMeta, ModuleError> {
         let current_funds = dbtx
-            .get_value(&DummyFundsKeyV1(input.account))
+            .get_value(&NostimintFundsKeyV1(input.account))
             .await
             .unwrap_or(Amount::ZERO);
 
         // verify user has enough funds or is using the fed account
         if input.amount > current_funds && fed_public_key() != input.account {
-            return Err(DummyError::NotEnoughFunds).into_module_error_other();
+            return Err(NostimintError::NotEnoughFunds).into_module_error_other();
         }
 
         // Subtract funds from normal user, or print funds for the fed
@@ -363,7 +366,7 @@ impl ServerModule for Dummy {
             current_funds - input.amount
         };
 
-        dbtx.insert_entry(&DummyFundsKeyV1(input.account), &updated_funds)
+        dbtx.insert_entry(&NostimintFundsKeyV1(input.account), &updated_funds)
             .await;
 
         Ok(InputMeta {
@@ -379,18 +382,18 @@ impl ServerModule for Dummy {
     async fn process_output<'a, 'b>(
         &'a self,
         dbtx: &mut ModuleDatabaseTransaction<'b>,
-        output: &'a DummyOutput,
+        output: &'a NostimintOutput,
         out_point: OutPoint,
     ) -> Result<TransactionItemAmount, ModuleError> {
         // Add output funds to the user's account
-        let current_funds = dbtx.get_value(&DummyFundsKeyV1(output.account)).await;
+        let current_funds = dbtx.get_value(&NostimintFundsKeyV1(output.account)).await;
         let updated_funds = current_funds.unwrap_or(Amount::ZERO) + output.amount;
-        dbtx.insert_entry(&DummyFundsKeyV1(output.account), &updated_funds)
+        dbtx.insert_entry(&NostimintFundsKeyV1(output.account), &updated_funds)
             .await;
 
         // Update the output outcome the user can query
-        let outcome = DummyOutputOutcome(updated_funds, output.account);
-        dbtx.insert_entry(&DummyOutcomeKey(out_point), &outcome)
+        let outcome = NostimintOutputOutcome(updated_funds, output.account);
+        dbtx.insert_entry(&NostimintOutcomeKey(out_point), &outcome)
             .await;
 
         Ok(TransactionItemAmount {
@@ -403,20 +406,25 @@ impl ServerModule for Dummy {
         &self,
         dbtx: &mut ModuleDatabaseTransaction<'_>,
         out_point: OutPoint,
-    ) -> Option<DummyOutputOutcome> {
+    ) -> Option<NostimintOutputOutcome> {
         // check whether or not the output has been processed
-        dbtx.get_value(&DummyOutcomeKey(out_point)).await
+        dbtx.get_value(&NostimintOutcomeKey(out_point)).await
     }
 
     async fn audit(&self, dbtx: &mut ModuleDatabaseTransaction<'_>, audit: &mut Audit) {
         audit
-            .add_items(dbtx, KIND.as_str(), &DummyFundsPrefixV1, |k, v| match k {
-                // the fed's test account is considered an asset (positive)
-                // should be the bitcoin we own in a real module
-                DummyFundsKeyV1(key) if key == fed_public_key() => v.msats as i64,
-                // a user's funds are a federation's liability (negative)
-                DummyFundsKeyV1(_) => -(v.msats as i64),
-            })
+            .add_items(
+                dbtx,
+                KIND.as_str(),
+                &NostimintFundsPrefixV1,
+                |k, v| match k {
+                    // the fed's test account is considered an asset (positive)
+                    // should be the bitcoin we own in a real module
+                    NostimintFundsKeyV1(key) if key == fed_public_key() => v.msats as i64,
+                    // a user's funds are a federation's liability (negative)
+                    NostimintFundsKeyV1(_) => -(v.msats as i64),
+                },
+            )
             .await;
     }
 
@@ -425,10 +433,10 @@ impl ServerModule for Dummy {
             api_endpoint! {
                 // API allows users ask the fed to threshold-sign a message
                 "sign_message",
-                async |module: &Dummy, context, message: String| -> () {
+                async |module: &Nostimint, context, message: String| -> () {
                     // TODO: Should not write to DB in module APIs
                     let mut dbtx = context.dbtx();
-                    dbtx.insert_entry(&DummySignatureKey(message), &None).await;
+                    dbtx.insert_entry(&NostimintSignatureKey(message), &None).await;
                     module.sign_notify.notify_one();
                     Ok(())
                 }
@@ -436,8 +444,8 @@ impl ServerModule for Dummy {
             api_endpoint! {
                 // API waits for the signature to exist
                 "wait_signed",
-                async |_module: &Dummy, context, message: String| -> SerdeSignature {
-                    let future = context.wait_value_matches(DummySignatureKey(message), |sig| sig.is_some());
+                async |_module: &Nostimint, context, message: String| -> SerdeSignature {
+                    let future = context.wait_value_matches(NostimintSignatureKey(message), |sig| sig.is_some());
                     let sig = future.await;
                     Ok(sig.expect("checked is some"))
                 }
@@ -448,14 +456,14 @@ impl ServerModule for Dummy {
 
 /// An in-memory cache we could use for faster validation
 #[derive(Debug, Clone)]
-pub struct DummyVerificationCache;
+pub struct NostimintVerificationCache;
 
-impl fedimint_core::server::VerificationCache for DummyVerificationCache {}
+impl fedimint_core::server::VerificationCache for NostimintVerificationCache {}
 
-impl Dummy {
+impl Nostimint {
     /// Create new module instance
-    pub fn new(cfg: DummyConfig) -> Dummy {
-        Dummy {
+    pub fn new(cfg: NostimintConfig) -> Nostimint {
+        Nostimint {
             cfg,
             sign_notify: Notify::new(),
         }

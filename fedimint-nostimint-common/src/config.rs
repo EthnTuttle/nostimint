@@ -5,30 +5,30 @@ use serde::{Deserialize, Serialize};
 use threshold_crypto::serde_impl::SerdeSecret;
 use threshold_crypto::{PublicKey, PublicKeySet, SecretKeyShare};
 
-use crate::DummyCommonGen;
+use crate::NostimintCommonGen;
 
 /// Parameters necessary to generate this module's configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DummyGenParams {
-    pub local: DummyGenParamsLocal,
-    pub consensus: DummyGenParamsConsensus,
+pub struct NostimintGenParams {
+    pub local: NostimintGenParamsLocal,
+    pub consensus: NostimintGenParamsConsensus,
 }
 
 /// Local parameters for config generation
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DummyGenParamsLocal(pub String);
+pub struct NostimintGenParamsLocal(pub String);
 
 /// Consensus parameters for config generation
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DummyGenParamsConsensus {
+pub struct NostimintGenParamsConsensus {
     pub tx_fee: Amount,
 }
 
-impl Default for DummyGenParams {
+impl Default for NostimintGenParams {
     fn default() -> Self {
         Self {
-            local: DummyGenParamsLocal("example".to_string()),
-            consensus: DummyGenParamsConsensus {
+            local: NostimintGenParamsLocal("example".to_string()),
+            consensus: NostimintGenParamsConsensus {
                 tx_fee: Amount::ZERO,
             },
         }
@@ -37,15 +37,15 @@ impl Default for DummyGenParams {
 
 /// Contains all the configuration for the server
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DummyConfig {
-    pub local: DummyConfigLocal,
-    pub private: DummyConfigPrivate,
-    pub consensus: DummyConfigConsensus,
+pub struct NostimintConfig {
+    pub local: NostimintConfigLocal,
+    pub private: NostimintConfigPrivate,
+    pub consensus: NostimintConfigConsensus,
 }
 
 /// Contains all the configuration for the client
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable, Hash)]
-pub struct DummyClientConfig {
+pub struct NostimintClientConfig {
     /// Accessible to clients
     pub tx_fee: Amount,
     pub fed_public_key: PublicKey,
@@ -53,13 +53,13 @@ pub struct DummyClientConfig {
 
 /// Locally unencrypted config unique to each member
 #[derive(Clone, Debug, Serialize, Deserialize, Decodable, Encodable)]
-pub struct DummyConfigLocal {
+pub struct NostimintConfigLocal {
     pub example: String,
 }
 
 /// Will be the same for every federation member
 #[derive(Clone, Debug, Serialize, Deserialize, Decodable, Encodable)]
-pub struct DummyConfigConsensus {
+pub struct NostimintConfigConsensus {
     /// Example federation threshold signing key
     pub public_key_set: PublicKeySet,
     /// Will be the same for all peers
@@ -68,20 +68,20 @@ pub struct DummyConfigConsensus {
 
 /// Will be encrypted and not shared such as private key material
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DummyConfigPrivate {
+pub struct NostimintConfigPrivate {
     /// Example private key share for a single member
     pub private_key_share: SerdeSecret<SecretKeyShare>,
 }
 
 // Wire together the configs for this module
 plugin_types_trait_impl_config!(
-    DummyCommonGen,
-    DummyGenParams,
-    DummyGenParamsLocal,
-    DummyGenParamsConsensus,
-    DummyConfig,
-    DummyConfigLocal,
-    DummyConfigPrivate,
-    DummyConfigConsensus,
-    DummyClientConfig
+    NostimintCommonGen,
+    NostimintGenParams,
+    NostimintGenParamsLocal,
+    NostimintGenParamsConsensus,
+    NostimintConfig,
+    NostimintConfigLocal,
+    NostimintConfigPrivate,
+    NostimintConfigConsensus,
+    NostimintClientConfig
 );
