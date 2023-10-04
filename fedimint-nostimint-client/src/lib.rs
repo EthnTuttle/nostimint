@@ -155,8 +155,8 @@ impl NostimintClientExt for Client {
 
     async fn fed_signature(&self, message: &str) -> anyhow::Result<Signature> {
         let (_nostimint, instance) = self.get_first_module::<NostimintClientModule>(&KIND);
-        instance.api.sign_message(message.to_string()).await?;
-        let sig = instance.api.wait_signed(message.to_string()).await?;
+        instance.api.sign_note(message.to_string()).await?;
+        let sig = instance.api.wait_signed_note(message.to_string()).await?;
         Ok(sig.0)
     }
 

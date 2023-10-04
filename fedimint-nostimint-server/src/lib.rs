@@ -432,7 +432,7 @@ impl ServerModule for Nostimint {
         vec![
             api_endpoint! {
                 // API allows users ask the fed to threshold-sign a message
-                "sign_message",
+                "sign_note",
                 async |module: &Nostimint, context, message: String| -> () {
                     // TODO: Should not write to DB in module APIs
                     let mut dbtx = context.dbtx();
@@ -443,7 +443,7 @@ impl ServerModule for Nostimint {
             },
             api_endpoint! {
                 // API waits for the signature to exist
-                "wait_signed",
+                "wait_signed_note",
                 async |_module: &Nostimint, context, message: String| -> SerdeSignature {
                     let future = context.wait_value_matches(NostimintSignatureKey(message), |sig| sig.is_some());
                     let sig = future.await;

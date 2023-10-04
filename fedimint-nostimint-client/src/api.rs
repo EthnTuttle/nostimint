@@ -6,9 +6,9 @@ use fedimint_core::{apply, async_trait_maybe_send};
 
 #[apply(async_trait_maybe_send!)]
 pub trait NostimintFederationApi {
-    async fn sign_message(&self, message: String) -> FederationResult<()>;
-
-    async fn wait_signed(&self, message: String) -> FederationResult<SerdeSignature>;
+    async fn sign_note(&self, message: String) -> FederationResult<()>;
+    // TODO: Update returned type to be signed nostr event
+    async fn wait_signed_note(&self, message: String) -> FederationResult<SerdeSignature>;
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -16,13 +16,17 @@ impl<T: ?Sized> NostimintFederationApi for T
 where
     T: IModuleFederationApi + MaybeSend + MaybeSync + 'static,
 {
-    async fn sign_message(&self, message: String) -> FederationResult<()> {
-        self.request_current_consensus("sign_message".to_string(), ApiRequestErased::new(message))
+    async fn sign_note(&self, message: String) -> FederationResult<()> {
+        self.request_current_consensus("sign_note".to_string(), ApiRequestErased::new(message))
             .await
     }
 
-    async fn wait_signed(&self, message: String) -> FederationResult<SerdeSignature> {
-        self.request_current_consensus("wait_signed".to_string(), ApiRequestErased::new(message))
-            .await
+    // TODO: Update returned type to be signed nostr event
+    async fn wait_signed_note(&self, message: String) -> FederationResult<SerdeSignature> {
+        self.request_current_consensus(
+            "wait_signed_note".to_string(),
+            ApiRequestErased::new(message),
+        )
+        .await
     }
 }
