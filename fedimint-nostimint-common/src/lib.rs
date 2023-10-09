@@ -21,11 +21,42 @@ pub const KIND: ModuleKind = ModuleKind::from_static_str("nostimint");
 /// Modules are non-compatible with older versions
 pub const CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion(0);
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize, Encodable, Decodable)]
+pub struct Nonce {
+    value: u64,
+}
+
+#[derive(Serialize, Deserialize, Hash, Debug, Clone, PartialEq, Eq)]
+pub struct Event {
+    pub event: nostr_sdk::Event,
+}
+
+impl AsRef<[u8]> for Event {
+    fn as_ref(&self) -> &[u8] {
+        todo!()
+    }
+}
+
+impl Decodable for Event {
+    fn consensus_decode<R: std::io::Read>(
+        r: &mut R,
+        _modules: &fedimint_core::module::registry::ModuleDecoderRegistry,
+    ) -> Result<Self, fedimint_core::encoding::DecodeError> {
+        todo!()
+    }
+}
+
+impl Encodable for Event {
+    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<usize, std::io::Error> {
+        todo!()
+    }
+}
+
 /// Non-transaction items that will be submitted to consensus
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub enum NostimintConsensusItem {
     /// User's message sign request signed by a single peer
-    Sign(String, SerdeSignatureShare),
+    Note(Event, SerdeSignatureShare), // Nonce here eventually
 }
 
 /// Input for a fedimint transaction

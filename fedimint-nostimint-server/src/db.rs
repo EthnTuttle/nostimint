@@ -2,6 +2,7 @@ use fedimint_core::db::DatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::epoch::{SerdeSignature, SerdeSignatureShare};
 use fedimint_core::{impl_db_lookup, impl_db_record, Amount, OutPoint, PeerId};
+use fedimint_nostimint_common::Event;
 use futures::StreamExt;
 use secp256k1::XOnlyPublicKey;
 use serde::Serialize;
@@ -100,7 +101,7 @@ impl_db_lookup!(
 
 /// Lookup signature requests by key or prefix
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
-pub struct NostimintSignatureShareKey(pub String, pub PeerId);
+pub struct NostimintSignatureShareKey(pub Event, pub PeerId);
 
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
 pub struct NostimintSignatureShareStringPrefix(pub String);
@@ -121,19 +122,16 @@ impl_db_lookup!(
 
 /// Lookup signature requests by key or prefix
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
-pub struct NostimintSignatureKey(pub String);
+pub struct NostimintKind1Key(pub String);
 
 #[derive(Debug, Encodable, Decodable)]
-pub struct NostimintSignaturePrefix;
+pub struct NostimintKind1Prefix;
 
 impl_db_record!(
-    key = NostimintSignatureKey,
+    key = NostimintKind1Key,
     value = Option<SerdeSignature>,
     db_prefix = DbKeyPrefix::Signature,
     // Allows us to listen for notifications on this key
     notify_on_modify = true
 );
-impl_db_lookup!(
-    key = NostimintSignatureKey,
-    query_prefix = NostimintSignaturePrefix
-);
+impl_db_lookup!(key = NostimintKind1Key, query_prefix = NostimintKind1Prefix);

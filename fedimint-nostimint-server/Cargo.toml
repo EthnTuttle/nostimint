@@ -18,6 +18,7 @@ erased-serde = "0.3"
 futures = "0.3"
 fedimint-core = { workspace = true }
 fedimint-nostimint-common = { path = "../fedimint-nostimint-common" }
+nostr-sdk = { workspace = true }
 rand = "0.8"
 serde = { version = "1.0.149", features = [ "derive" ] }
 secp256k1 = "0.24.2"
@@ -28,3 +29,4 @@ fedimint-server = { workspace = true }
 tracing = "0.1.37"
 threshold_crypto = { workspace = true }
 tokio = { version = "1.26.0", features = ["sync"] }
+

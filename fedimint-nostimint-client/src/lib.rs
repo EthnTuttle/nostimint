@@ -23,6 +23,7 @@ use fedimint_nostimint_common::{NostimintCommonGen, NostimintModuleTypes, KIND};
 use secp256k1::{Secp256k1, XOnlyPublicKey};
 use states::NostimintStateMachine;
 use threshold_crypto::{PublicKey, Signature};
+use tracing::info;
 
 use crate::api::NostimintFederationApi;
 
@@ -47,6 +48,7 @@ impl NostimintClientExt for Client {
     async fn fed_sign_note(&self, message: &str) -> anyhow::Result<Signature> {
         let (_nostimint, instance) = self.get_first_module::<NostimintClientModule>(&KIND);
         instance.api.sign_note(message.to_string()).await?;
+        info!("message sent to server to be signed: {}", message);
         let sig = instance.api.wait_signed_note(message.to_string()).await?;
         Ok(sig.0)
     }

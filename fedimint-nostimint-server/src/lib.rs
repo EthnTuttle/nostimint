@@ -1,5 +1,13 @@
 use std::collections::BTreeMap;
+use std::env;
+use std::str::FromStr;
 use std::string::ToString;
+
+use bitcoin_hashes::sha256;
+use chrono::Utc;
+use nostr_sdk::prelude::FromSkStr;
+use nostr_sdk::{EventBuilder, Keys};
+use tracing::debug;
 
 use anyhow::bail;
 use async_trait::async_trait;
@@ -22,22 +30,26 @@ pub use fedimint_nostimint_common::config::{
     NostimintClientConfig, NostimintConfig, NostimintConfigConsensus, NostimintConfigLocal,
     NostimintConfigPrivate, NostimintGenParams,
 };
+use fedimint_nostimint_common::Event;
 pub use fedimint_nostimint_common::{
     fed_public_key, NostimintCommonGen, NostimintConsensusItem, NostimintError, NostimintInput,
     NostimintModuleTypes, NostimintOutput, NostimintOutputOutcome, CONSENSUS_VERSION, KIND,
 };
 use fedimint_server::config::distributedgen::PeerHandleOps;
+use fedimint_server::consensus::debug;
 use futures::{FutureExt, StreamExt};
 use rand::rngs::OsRng;
+use secp256k1::{KeyPair, Message, Secp256k1, SecretKey};
+use serde_json::json;
 use strum::IntoEnumIterator;
 use threshold_crypto::serde_impl::SerdeSecret;
 use threshold_crypto::{PublicKeySet, SecretKeySet};
 use tokio::sync::Notify;
 
 use crate::db::{
-    migrate_to_v1, DbKeyPrefix, NostimintFundsKeyV1, NostimintFundsPrefixV1, NostimintOutcomeKey,
-    NostimintOutcomePrefix, NostimintSignatureKey, NostimintSignaturePrefix,
-    NostimintSignatureShareKey, NostimintSignatureSharePrefix, NostimintSignatureShareStringPrefix,
+    migrate_to_v1, DbKeyPrefix, NostimintFundsKeyV1, NostimintFundsPrefixV1, NostimintKind1Key,
+    NostimintKind1Prefix, NostimintOutcomeKey, NostimintOutcomePrefix, NostimintSignatureShareKey,
+    NostimintSignatureSharePrefix, NostimintSignatureShareStringPrefix,
 };
 
 mod db;
@@ -89,28 +101,29 @@ impl ServerModuleInit for NostimintGen {
         peers: &[PeerId],
         params: &ConfigGenModuleParams,
     ) -> BTreeMap<PeerId, ServerModuleConfig> {
-        let params = self.parse_params(params).unwrap();
-        // Create trusted set of threshold keys
-        let sks = SecretKeySet::random(peers.degree(), &mut OsRng);
-        let pks: PublicKeySet = sks.public_keys();
-        // Generate a config for each peer
-        peers
-            .iter()
-            .map(|&peer| {
-                let private_key_share = SerdeSecret(sks.secret_key_share(peer.to_usize()));
-                let config = NostimintConfig {
-                    local: NostimintConfigLocal {
-                        example: params.local.0.clone(),
-                    },
-                    private: NostimintConfigPrivate { private_key_share },
-                    consensus: NostimintConfigConsensus {
-                        public_key_set: pks.clone(),
-                        tx_fee: params.consensus.tx_fee,
-                    },
-                };
-                (peer, config.to_erased())
-            })
-            .collect()
+        // let params = self.parse_params(params).unwrap();
+        // // Create trusted set of threshold keys
+        // let sks = SecretKeySet::random(peers.degree(), &mut OsRng);
+        // let pks: PublicKeySet = sks.public_keys();
+        // // Generate a config for each peer
+        // peers
+        //     .iter()
+        //     .map(|&peer| {
+        //         let private_key_share = SerdeSecret(sks.secret_key_share(peer.to_usize()));
+        //         let config = NostimintConfig {
+        //             local: NostimintConfigLocal {
+        //                 example: params.local.0.clone(),
+        //             },
+        //             private: NostimintConfigPrivate { private_key_share },
+        //             consensus: NostimintConfigConsensus {
+        //                 public_key_set: pks.clone(),
+        //                 tx_fee: params.consensus.tx_fee,
+        //             },
+        //         };
+        //         (peer, config.to_erased())
+        //     })
+        //     .collect()
+        BTreeMap::new()
     }
 
     /// Generates configs for all peers in an untrusted manner
@@ -212,7 +225,7 @@ impl ServerModuleInit for NostimintGen {
                 DbKeyPrefix::Signature => {
                     push_db_pair_items!(
                         dbtx,
-                        NostimintSignaturePrefix,
+                        NostimintKind1Prefix,
                         NostimintSignatureKey,
                         Option<SerdeSignature>,
                         items,
@@ -253,19 +266,25 @@ impl ServerModule for Nostimint {
         &self,
         dbtx: &mut ModuleDatabaseTransaction<'_>,
     ) -> ConsensusProposal<NostimintConsensusItem> {
-        // Sign and send the print requests to consensus
+        // Check for Kind1's to be signed
         let sign_requests: Vec<_> = dbtx
-            .find_by_prefix(&NostimintSignaturePrefix)
+            .find_by_prefix(&NostimintKind1Prefix)
             .await
             .collect()
             .await;
 
+        // Create a Consensus Item
         let consensus_items = sign_requests
             .into_iter()
             .filter(|(_, sig)| sig.is_none())
-            .map(|(NostimintSignatureKey(message), _)| {
+            .map(|(NostimintKind1Key(message), _)| {
+                // TODO: craft nostr note of kind1 and sign wiht FROST key (shoudl the nonce used be part of this?)
+                let my_keys = Keys::from_sk_str(&env::var("NOSTR_PRIVKEY").unwrap()).unwrap();
+                let bech32_pubkey: String = my_keys.public_key().to_bech32();
+                println!("Bech32 PubKey: {}", bech32_pubkey);
+                let event = EventBuilder::new_text_note(message, &[]).to_event(&my_keys);
                 let sig = self.cfg.private.private_key_share.sign(&message);
-                NostimintConsensusItem::Sign(message, SerdeSignatureShare(sig))
+                NostimintConsensusItem::Note(event, SerdeSignatureShare(sig))
             });
         ConsensusProposal::new_auto_trigger(consensus_items.collect())
     }
@@ -276,10 +295,10 @@ impl ServerModule for Nostimint {
         consensus_item: NostimintConsensusItem,
         peer_id: PeerId,
     ) -> anyhow::Result<()> {
-        let NostimintConsensusItem::Sign(request, share) = consensus_item;
+        let NostimintConsensusItem::Note(event, share) = consensus_item;
 
         if dbtx
-            .get_value(&NostimintSignatureShareKey(request.clone(), peer_id))
+            .get_value(&NostimintSignatureShareKey(event.clone(), peer_id))
             .await
             .is_some()
         {
@@ -291,20 +310,19 @@ impl ServerModule for Nostimint {
             .consensus
             .public_key_set
             .public_key_share(peer_id.to_usize())
-            .verify(&share.0, request.clone())
+            .verify(&share.0, event.event.clone())
         {
             bail!("Signature share is invalid");
         }
 
-        dbtx.insert_new_entry(
-            &NostimintSignatureShareKey(request.clone(), peer_id),
-            &share,
-        )
-        .await;
+        dbtx.insert_new_entry(&NostimintSignatureShareKey(event.clone(), peer_id), &share)
+            .await;
 
         // Collect all valid signature shares previously received
         let signature_shares = dbtx
-            .find_by_prefix(&NostimintSignatureShareStringPrefix(request.clone()))
+            .find_by_prefix(&NostimintSignatureShareStringPrefix(
+                event.event.as_json().to_string(),
+            ))
             .await
             .collect::<Vec<_>>()
             .await;
@@ -324,11 +342,13 @@ impl ServerModule for Nostimint {
             )
             .expect("We have verified all signature shares before");
 
-        dbtx.remove_by_prefix(&NostimintSignatureShareStringPrefix(request.clone()))
-            .await;
+        dbtx.remove_by_prefix(&NostimintSignatureShareStringPrefix(
+            event.event.as_json().to_string(),
+        ))
+        .await;
 
         dbtx.insert_entry(
-            &NostimintSignatureKey(request.to_string()),
+            &NostimintKind1Key(event.event.as_json().to_string()),
             &Some(SerdeSignature(threshold_signature)),
         )
         .await;
@@ -431,12 +451,12 @@ impl ServerModule for Nostimint {
     fn api_endpoints(&self) -> Vec<ApiEndpoint<Self>> {
         vec![
             api_endpoint! {
-                // API allows users ask the fed to threshold-sign a message
+                // API allows users ask the fed to threshold-sign a message into a kind1 nostr note
                 "sign_note",
                 async |module: &Nostimint, context, message: String| -> () {
                     // TODO: Should not write to DB in module APIs
                     let mut dbtx = context.dbtx();
-                    dbtx.insert_entry(&NostimintSignatureKey(message), &None).await;
+                    dbtx.insert_entry(&NostimintKind1Key(message), &None).await;
                     module.sign_notify.notify_one();
                     Ok(())
                 }
@@ -445,7 +465,7 @@ impl ServerModule for Nostimint {
                 // API waits for the signature to exist
                 "wait_signed_note",
                 async |_module: &Nostimint, context, message: String| -> SerdeSignature {
-                    let future = context.wait_value_matches(NostimintSignatureKey(message), |sig| sig.is_some());
+                    let future = context.wait_value_matches(NostimintKind1Key(message), |sig| sig.is_some());
                     let sig = future.await;
                     Ok(sig.expect("checked is some"))
                 }
@@ -469,3 +489,14 @@ impl Nostimint {
         }
     }
 }
+
+// fn publish_to_relay(relay: &str, message: &websocket::Message) -> Result<(), String> {
+//     let mut client = ClientBuilder::new(relay)
+//         .map_err(|err| format!("Could not create client: {}", err.to_string()))?
+//         .connect(None)
+//         .map_err(|err| format!("Could not connect to relay {}: {}", relay, err.to_string()))?;
+//     client
+//         .send_message(message)
+//         .map_err(|err| format!("could not send message to relay: {}", err.to_string()))?;
+//     Ok(())
+// }
