@@ -3,7 +3,7 @@ use std::env;
 use std::string::ToString;
 
 use nostr_sdk::prelude::FromSkStr;
-use nostr_sdk::{EventBuilder, Keys, ToBech32};
+use nostr_sdk::{EventId, Keys, ToBech32};
 
 use anyhow::bail;
 use async_trait::async_trait;
@@ -12,7 +12,7 @@ use fedimint_core::config::{
     TypedServerModuleConfig, TypedServerModuleConsensusConfig,
 };
 use fedimint_core::db::{Database, DatabaseVersion, MigrationMap, ModuleDatabaseTransaction};
-use fedimint_core::epoch::{SerdeSignature, SerdeSignatureShare};
+use fedimint_core::epoch::SerdeSignatureShare;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     api_endpoint, ApiEndpoint, ConsensusProposal, CoreConsensusVersion, ExtendsCommonModuleInit,
@@ -212,14 +212,14 @@ impl ServerModuleInit for NostimintGen {
                         "Nostimint Signature Shares"
                     );
                 }
-                DbKeyPrefix::Signature => {
+                DbKeyPrefix::Event => {
                     push_db_pair_items!(
                         dbtx,
                         NostimintKind1Prefix,
                         NostimintSignatureKey,
-                        Option<SerdeSignature>,
+                        Option<Event>,
                         items,
-                        "Nostimint Signatures"
+                        "Nostimint Events"
                     );
                 }
             }
@@ -272,12 +272,8 @@ impl ServerModule for Nostimint {
                 let my_keys = Keys::from_sk_str(&env::var("NOSTR_PRIVKEY").unwrap()).unwrap();
                 let bech32_pubkey: String = my_keys.public_key().to_bech32().unwrap();
                 println!("Bech32 PubKey: {}", bech32_pubkey);
-                let event = EventBuilder::new_text_note(message, &[])
-                    .to_event(&my_keys)
-                    .unwrap();
-                let event = Event { event };
-                let sig = self.cfg.private.private_key_share.sign(&event);
-                NostimintConsensusItem::Note(event, SerdeSignatureShare(sig))
+                let sig = self.cfg.private.private_key_share.sign(&message);
+                NostimintConsensusItem::Note(message, SerdeSignatureShare(sig))
             });
         ConsensusProposal::new_auto_trigger(consensus_items.collect())
     }
@@ -313,9 +309,7 @@ impl ServerModule for Nostimint {
 
         // Collect all valid signature shares previously received
         let signature_shares = dbtx
-            .find_by_prefix(&NostimintSignatureShareStringPrefix(
-                event.event.as_json().to_string(),
-            ))
+            .find_by_prefix(&NostimintSignatureShareStringPrefix(event.event.id))
             .await
             .collect::<Vec<_>>()
             .await;
@@ -324,27 +318,23 @@ impl ServerModule for Nostimint {
             return Ok(());
         }
 
-        let threshold_signature = self
-            .cfg
-            .consensus
-            .public_key_set
-            .combine_signatures(
-                signature_shares
-                    .iter()
-                    .map(|(peer_id, share)| (peer_id.1.to_usize(), &share.0)),
-            )
-            .expect("We have verified all signature shares before");
+        // let _threshold_signature = self
+        //     .cfg
+        //     .consensus
+        //     .public_key_set
+        //     .combine_signatures(
+        //         signature_shares
+        //             .iter()
+        //             .map(|(peer_id, share)| (peer_id.1.to_usize(), &share.0)),
+        //     )
+        //     .expect("We have verified all signature shares before");
 
-        dbtx.remove_by_prefix(&NostimintSignatureShareStringPrefix(
-            event.event.as_json().to_string(),
-        ))
-        .await;
+        // pretty sure this is incorrect....
+        dbtx.remove_by_prefix(&NostimintSignatureShareStringPrefix(event.event.id))
+            .await;
 
-        dbtx.insert_entry(
-            &NostimintKind1Key(event.event.as_json().to_string()),
-            &Some(SerdeSignature(threshold_signature)),
-        )
-        .await;
+        dbtx.insert_entry(&NostimintKind1Key(event.clone()), &Some(event))
+            .await;
 
         Ok(())
     }
@@ -446,18 +436,20 @@ impl ServerModule for Nostimint {
             api_endpoint! {
                 // API allows users ask the fed to threshold-sign a message into a kind1 nostr note
                 "sign_note",
-                async |module: &Nostimint, context, message: String| -> () {
+                async |module: &Nostimint, context, message: Event| -> EventId {
                     // TODO: Should not write to DB in module APIs
                     let mut dbtx = context.dbtx();
-                    dbtx.insert_entry(&NostimintKind1Key(message), &None).await;
+                    // TODO: create event here now
+                    dbtx.insert_entry(&NostimintKind1Key(message.clone()), &None).await;
                     module.sign_notify.notify_one();
-                    Ok(())
+                    let event_id = message.event.id;
+                    Ok(event_id)
                 }
             },
             api_endpoint! {
                 // API waits for the signature to exist
                 "wait_signed_note",
-                async |_module: &Nostimint, context, message: String| -> SerdeSignature {
+                async |_module: &Nostimint, context, message: Event| -> Event {
                     let future = context.wait_value_matches(NostimintKind1Key(message), |sig| sig.is_some());
                     let sig = future.await;
                     Ok(sig.expect("checked is some"))

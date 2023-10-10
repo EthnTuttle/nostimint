@@ -1,9 +1,10 @@
 use fedimint_core::db::DatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::epoch::{SerdeSignature, SerdeSignatureShare};
+use fedimint_core::epoch::SerdeSignatureShare;
 use fedimint_core::{impl_db_lookup, impl_db_record, Amount, OutPoint, PeerId};
 use fedimint_nostimint_common::Event;
 use futures::StreamExt;
+use nostr_sdk::EventId;
 use secp256k1::XOnlyPublicKey;
 use serde::Serialize;
 use strum_macros::EnumIter;
@@ -17,7 +18,7 @@ pub enum DbKeyPrefix {
     Funds = 0x01,
     Outcome = 0x02,
     SignatureShare = 0x03,
-    Signature = 0x04,
+    Event = 0x04,
 }
 
 // TODO: Boilerplate-code
@@ -103,8 +104,14 @@ impl_db_lookup!(
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
 pub struct NostimintSignatureShareKey(pub Event, pub PeerId);
 
-#[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
-pub struct NostimintSignatureShareStringPrefix(pub String);
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize)]
+pub struct NostimintSignatureShareStringPrefix(pub EventId);
+
+impl Encodable for NostimintSignatureShareStringPrefix {
+    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<usize, std::io::Error> {
+        self.0.as_bytes().consensus_encode(writer)
+    }
+}
 
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
 pub struct NostimintSignatureSharePrefix;
@@ -122,15 +129,15 @@ impl_db_lookup!(
 
 /// Lookup signature requests by key or prefix
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
-pub struct NostimintKind1Key(pub String);
+pub struct NostimintKind1Key(pub Event);
 
 #[derive(Debug, Encodable, Decodable)]
 pub struct NostimintKind1Prefix;
 
 impl_db_record!(
     key = NostimintKind1Key,
-    value = Option<SerdeSignature>,
-    db_prefix = DbKeyPrefix::Signature,
+    value = Option<Event>,
+    db_prefix = DbKeyPrefix::Event,
     // Allows us to listen for notifications on this key
     notify_on_modify = true
 );
