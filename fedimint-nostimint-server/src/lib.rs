@@ -1,13 +1,9 @@
 use std::collections::BTreeMap;
 use std::env;
-use std::str::FromStr;
 use std::string::ToString;
 
-use bitcoin_hashes::sha256;
-use chrono::Utc;
 use nostr_sdk::prelude::FromSkStr;
-use nostr_sdk::{EventBuilder, Keys};
-use tracing::debug;
+use nostr_sdk::{EventBuilder, Keys, ToBech32};
 
 use anyhow::bail;
 use async_trait::async_trait;
@@ -25,7 +21,7 @@ use fedimint_core::module::{
 };
 use fedimint_core::server::DynServerModule;
 use fedimint_core::task::TaskGroup;
-use fedimint_core::{push_db_pair_items, Amount, NumPeers, OutPoint, PeerId, ServerModule};
+use fedimint_core::{push_db_pair_items, Amount, OutPoint, PeerId, ServerModule};
 pub use fedimint_nostimint_common::config::{
     NostimintClientConfig, NostimintConfig, NostimintConfigConsensus, NostimintConfigLocal,
     NostimintConfigPrivate, NostimintGenParams,
@@ -36,14 +32,8 @@ pub use fedimint_nostimint_common::{
     NostimintModuleTypes, NostimintOutput, NostimintOutputOutcome, CONSENSUS_VERSION, KIND,
 };
 use fedimint_server::config::distributedgen::PeerHandleOps;
-use fedimint_server::consensus::debug;
 use futures::{FutureExt, StreamExt};
-use rand::rngs::OsRng;
-use secp256k1::{KeyPair, Message, Secp256k1, SecretKey};
-use serde_json::json;
 use strum::IntoEnumIterator;
-use threshold_crypto::serde_impl::SerdeSecret;
-use threshold_crypto::{PublicKeySet, SecretKeySet};
 use tokio::sync::Notify;
 
 use crate::db::{
@@ -98,8 +88,8 @@ impl ServerModuleInit for NostimintGen {
     /// Generates configs for all peers in a trusted manner for testing
     fn trusted_dealer_gen(
         &self,
-        peers: &[PeerId],
-        params: &ConfigGenModuleParams,
+        _peers: &[PeerId],
+        _params: &ConfigGenModuleParams,
     ) -> BTreeMap<PeerId, ServerModuleConfig> {
         // let params = self.parse_params(params).unwrap();
         // // Create trusted set of threshold keys
@@ -280,10 +270,13 @@ impl ServerModule for Nostimint {
             .map(|(NostimintKind1Key(message), _)| {
                 // TODO: craft nostr note of kind1 and sign wiht FROST key (shoudl the nonce used be part of this?)
                 let my_keys = Keys::from_sk_str(&env::var("NOSTR_PRIVKEY").unwrap()).unwrap();
-                let bech32_pubkey: String = my_keys.public_key().to_bech32();
+                let bech32_pubkey: String = my_keys.public_key().to_bech32().unwrap();
                 println!("Bech32 PubKey: {}", bech32_pubkey);
-                let event = EventBuilder::new_text_note(message, &[]).to_event(&my_keys);
-                let sig = self.cfg.private.private_key_share.sign(&message);
+                let event = EventBuilder::new_text_note(message, &[])
+                    .to_event(&my_keys)
+                    .unwrap();
+                let event = Event { event };
+                let sig = self.cfg.private.private_key_share.sign(&event);
                 NostimintConsensusItem::Note(event, SerdeSignatureShare(sig))
             });
         ConsensusProposal::new_auto_trigger(consensus_items.collect())
@@ -310,7 +303,7 @@ impl ServerModule for Nostimint {
             .consensus
             .public_key_set
             .public_key_share(peer_id.to_usize())
-            .verify(&share.0, event.event.clone())
+            .verify(&share.0, event.clone())
         {
             bail!("Signature share is invalid");
         }

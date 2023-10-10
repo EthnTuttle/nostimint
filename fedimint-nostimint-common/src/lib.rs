@@ -33,13 +33,13 @@ pub struct Event {
 
 impl AsRef<[u8]> for Event {
     fn as_ref(&self) -> &[u8] {
-        todo!()
+        self.event.id.as_bytes()
     }
 }
 
 impl Decodable for Event {
     fn consensus_decode<R: std::io::Read>(
-        r: &mut R,
+        _r: &mut R,
         _modules: &fedimint_core::module::registry::ModuleDecoderRegistry,
     ) -> Result<Self, fedimint_core::encoding::DecodeError> {
         todo!()
@@ -47,7 +47,10 @@ impl Decodable for Event {
 }
 
 impl Encodable for Event {
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<usize, std::io::Error> {
+    fn consensus_encode<W: std::io::Write>(
+        &self,
+        _writer: &mut W,
+    ) -> Result<usize, std::io::Error> {
         todo!()
     }
 }
