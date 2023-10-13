@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str;
 
 use config::NostimintClientConfig;
 use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
@@ -39,19 +40,19 @@ impl AsRef<[u8]> for Event {
 
 impl Decodable for Event {
     fn consensus_decode<R: std::io::Read>(
-        _r: &mut R,
-        _modules: &fedimint_core::module::registry::ModuleDecoderRegistry,
+        r: &mut R,
+        modules: &fedimint_core::module::registry::ModuleDecoderRegistry,
     ) -> Result<Self, fedimint_core::encoding::DecodeError> {
-        todo!()
+        let bytes = Vec::<u8>::consensus_decode(r, modules)?;
+        let json = String::from_utf8(bytes).unwrap();
+        let event = nostr_sdk::Event::from_json(json).unwrap();
+        Ok(Event { event })
     }
 }
 
 impl Encodable for Event {
-    fn consensus_encode<W: std::io::Write>(
-        &self,
-        _writer: &mut W,
-    ) -> Result<usize, std::io::Error> {
-        todo!()
+    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<usize, std::io::Error> {
+        self.event.as_json().as_bytes().consensus_encode(writer)
     }
 }
 
